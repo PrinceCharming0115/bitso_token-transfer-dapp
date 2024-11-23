@@ -5,7 +5,7 @@ import { useAccount, useBalance, useWriteContract } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
 import { createPublicClient, http } from 'viem'
 import { NETWORK } from '@/config/chainConfig'
-import { TOKEN_ABI } from '@/config/abis/tokenABI'
+import ContractABI from '@/config/abis/MockERC20.json'
 
 const TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_ADDRESS as `0x${string}`
 
@@ -14,14 +14,16 @@ export function TokenTransfer() {
   const [amount, setAmount] = useState('')
   const [tokenSymbol, setTokenSymbol] = useState('')
   const [tokenDecimals, setTokenDecimals] = useState<number>(18)
+  const [estimatedGas, setEstimatedGas] = useState<bigint | null>(null)
+  const [isPending, setIsPending] = useState(false)
   const { address } = useAccount()
 
-  const { data: balance } = useBalance({
+  const { data: balance, refetch: refetchBalance } = useBalance({
     address,
     token: TOKEN_ADDRESS,
   })
 
-  const { writeContract, isError, isSuccess } = useWriteContract()
+  const { writeContract, data: hash, isError, isSuccess } = useWriteContract()
 
   useEffect(() => {
     const getTokenInfo = async () => {
@@ -33,12 +35,12 @@ export function TokenTransfer() {
       const [symbol, decimals] = await Promise.all([
         publicClient.readContract({
           address: TOKEN_ADDRESS,
-          abi: TOKEN_ABI,
+          abi: ContractABI.abi,
           functionName: 'symbol',
         }),
         publicClient.readContract({
           address: TOKEN_ADDRESS,
-          abi: TOKEN_ABI,
+          abi: ContractABI.abi,
           functionName: 'decimals',
         })
       ])
@@ -49,17 +51,73 @@ export function TokenTransfer() {
     getTokenInfo()
   }, [])
 
+  useEffect(() => {
+    const estimateGas = async () => {
+      if (!recipient || !amount || !address) return
+
+      try {
+        const amountInSmallestUnit = parseUnits(amount, tokenDecimals)
+        const publicClient = createPublicClient({
+          chain: NETWORK,
+          transport: http()
+        })
+
+        const gasEstimate = await publicClient.estimateContractGas({
+          address: TOKEN_ADDRESS,
+          abi: ContractABI.abi,
+          functionName: 'transfer',
+          args: [recipient, amountInSmallestUnit],
+          account: address,
+        })
+
+        setEstimatedGas(gasEstimate)
+      } catch (error) {
+        console.error('Gas estimation failed:', error)
+        setEstimatedGas(null)
+      }
+    }
+
+    // Initial estimation
+    estimateGas()
+
+    // Set up interval for periodic updates
+    const intervalId = setInterval(estimateGas, 10000) // 10 seconds
+
+    // Cleanup interval on unmount or when dependencies change
+    return () => clearInterval(intervalId)
+  }, [recipient, amount, address, tokenDecimals])
+
+  useEffect(() => {
+    const waitForTransaction = async () => {
+      if (hash) {
+        const publicClient = createPublicClient({
+          chain: NETWORK,
+          transport: http()
+        })
+        await publicClient.waitForTransactionReceipt({ hash: hash as `0x${string}` })
+        refetchBalance()
+      }
+    }
+    waitForTransaction()
+  }, [hash])
+
   const handleTransfer = async () => {
     try {
+      setIsPending(true)
       const amountInSmallestUnit = parseUnits(amount, tokenDecimals)
-      writeContract({
+      
+       await writeContract({
         address: TOKEN_ADDRESS,
-        abi: TOKEN_ABI,
+        abi: ContractABI.abi,
         functionName: 'transfer',
         args: [recipient, amountInSmallestUnit],
+        gas: estimatedGas || undefined,
       })
+      
+      setIsPending(false)
     } catch (error) {
       console.error('Transfer failed:', error)
+      setIsPending(false)
     }
   }
 
@@ -98,6 +156,12 @@ export function TokenTransfer() {
             />
           </div>
 
+          {estimatedGas && (
+            <div className="gas-estimate">
+              <span>Estimated Gas for Token Transfer: {estimatedGas.toString()} wei</span>
+            </div>
+          )}
+
           <button 
             onClick={handleTransfer}
             disabled={!recipient || !amount}
@@ -107,7 +171,13 @@ export function TokenTransfer() {
           </button>
         </div>
 
-        {isSuccess && (
+        {isPending && (
+          <div className="pending-message">
+            Transaction pending...
+          </div>
+        )}
+
+        {isSuccess && !isPending && (
           <div className="success-message">
             Transfer completed successfully!
           </div>
