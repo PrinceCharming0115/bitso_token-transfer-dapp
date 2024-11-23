@@ -8,29 +8,44 @@ function App() {
   const { connectors, connect, status, error } = useConnect()
   const { disconnect } = useDisconnect()
 
-  if (account.status === 'disconnected') {
+  if (account.status === 'disconnected' || !account.isConnected) {
     return (
-      <div>
-        <h2>Connect Wallet</h2>
-        {connectors.map((connector) => (
-          <button
-            key={connector.uid}
-            onClick={() => connect({ connector })}
-            type="button"
-          >
-            {connector.name}
-          </button>
-        ))}
-        <div>{status}</div>
-        <div>{error?.message}</div>
+      <div className="container">
+        <div className="card">
+          <h1 className="text-center">Welcome to Token Transfer dApp</h1>
+          <p className="text-center">Connect your wallet to get started</p>
+          
+          <div className="wallet-buttons">
+            {connectors.map((connector) => (
+              <button
+                key={connector.uid}
+                onClick={() => connect({ connector })}
+                className="wallet-button"
+              >
+                Connect {connector.name}
+              </button>
+            ))}
+          </div>
+          
+          {status === 'pending' && (
+            <p className="success-message">Connecting...</p>
+          )}
+          {error && (
+            <p className="error-message">{error.message}</p>
+          )}
+        </div>
       </div>
     )
   }
 
   return (
-    <div>
-      <div>
-        <button type="button" onClick={() => disconnect()}>
+    <div className="container">
+      <div className="header">
+        <h1>Token Transfer dApp</h1>
+        <button 
+          className="disconnect-button"
+          onClick={() => disconnect()}
+        >
           Disconnect
         </button>
       </div>
